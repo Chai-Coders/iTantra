@@ -69,7 +69,6 @@ class SttService {
   }
 
   void _handleSpeechError(String errorMsg) {
-    // Treat silence and no-match timeouts as normal pauses, not fatal errors
     if (errorMsg == 'error_no_match' ||
         errorMsg == 'error_speech_timeout' ||
         errorMsg == 'error_busy') {
@@ -98,14 +97,14 @@ class SttService {
 
     try {
       await _speech.listen(
-        localeId: localeId,
         listenOptions: SpeechListenOptions(
           partialResults: true,
           cancelOnError: false,
           listenMode: ListenMode.dictation,
+          localeId: localeId,
+          pauseFor: const Duration(seconds: 5),
+          listenFor: const Duration(seconds: 60),
         ),
-        pauseFor: const Duration(seconds: 5),
-        listenFor: const Duration(seconds: 60),
         onResult: (SpeechRecognitionResult result) {
           if (_resultCallback != null) {
             _resultCallback!(result.recognizedWords, result.finalResult);
@@ -117,9 +116,7 @@ class SttService {
           }
         },
       );
-    } catch (_) {
-      // Fallback silently without breaking the session
-    }
+    } catch (_) {}
   }
 
   Future<bool> startListening({

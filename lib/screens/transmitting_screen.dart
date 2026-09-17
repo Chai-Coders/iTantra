@@ -2,6 +2,8 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import '../transceiver_engine.dart';
 import '../stt_service.dart';
+import '../ml_engine.dart';
+import '../geo_engine.dart';
 
 class TransmittingScreen extends StatefulWidget {
   final String targetLang;
@@ -17,6 +19,7 @@ class _TransmittingScreenState extends State<TransmittingScreen> {
   final TextEditingController _textController = TextEditingController();
   bool _isProcessing = false;
   final SttService _stt = SttService();
+  String _translatedPreview = '';
 
   final List<String> _quickPhrases = const [
     'Evacuation teams arriving at sector junction.',
@@ -39,8 +42,14 @@ class _TransmittingScreenState extends State<TransmittingScreen> {
       language: widget.targetLang,
       onResult: (liveText, isFinal) {
         if (mounted && liveText.trim().isNotEmpty) {
+          final payload = EdgeMlEngine().processTransmission(
+            rawText: liveText,
+            sourceLang: 'English',
+            targetLang: widget.targetLang,
+          );
           setState(() {
             _textController.text = liveText;
+            _translatedPreview = payload.translatedText;
           });
         }
       },
@@ -76,6 +85,8 @@ class _TransmittingScreenState extends State<TransmittingScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final location = GeoEngine().currentLocation;
+
     return Scaffold(
       backgroundColor: const Color(0xFF0C0E12),
       body: SafeArea(
@@ -157,6 +168,29 @@ class _TransmittingScreenState extends State<TransmittingScreen> {
                   ),
                 ),
                 const SizedBox(height: 12),
+
+                // Location Pill
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF161A22),
+                    borderRadius: BorderRadius.circular(20),
+                    border: Border.all(color: Colors.white10),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const Icon(Icons.my_location, size: 12, color: Color(0xFF27AE60)),
+                      const SizedBox(width: 6),
+                      Text(
+                        'Geo-Fix: ${location.latitude.toStringAsFixed(4)}°N, ${location.longitude.toStringAsFixed(4)}°E',
+                        style: const TextStyle(fontSize: 11, color: Colors.white70),
+                      ),
+                    ],
+                  ),
+                ),
+
+                const SizedBox(height: 12),
                 ValueListenableBuilder<String>(
                   valueListenable: _stt.statusNotifier,
                   builder: (context, status, _) {
@@ -180,7 +214,9 @@ class _TransmittingScreenState extends State<TransmittingScreen> {
                     );
                   },
                 ),
-                const SizedBox(height: 16),
+                const SizedBox(height: 14),
+
+                // Raw Input Area
                 Container(
                   width: double.infinity,
                   padding: const EdgeInsets.all(12),
@@ -191,8 +227,18 @@ class _TransmittingScreenState extends State<TransmittingScreen> {
                   ),
                   child: TextField(
                     controller: _textController,
-                    maxLines: 3,
+                    maxLines: 2,
                     style: const TextStyle(color: Colors.white, fontSize: 13),
+                    onChanged: (val) {
+                      final trans = EdgeMlEngine().processTransmission(
+                        rawText: val,
+                        sourceLang: 'English',
+                        targetLang: widget.targetLang,
+                      );
+                      setState(() {
+                        _translatedPreview = trans.translatedText;
+                      });
+                    },
                     decoration: const InputDecoration(
                       border: InputBorder.none,
                       hintText: 'Speak now, type manually, or tap a tactical chip below...',
@@ -200,6 +246,41 @@ class _TransmittingScreenState extends State<TransmittingScreen> {
                     ),
                   ),
                 ),
+
+                // Translation Preview
+                if (_translatedPreview.isNotEmpty) ...[
+                  const SizedBox(height: 10),
+                  Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF1C222C),
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(color: const Color(0xFF2F80ED).withValues(alpha: 0.3)),
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          children: [
+                            const Icon(Icons.translate, size: 12, color: Color(0xFF2F80ED)),
+                            const SizedBox(width: 6),
+                            Text(
+                              'Auto-Translated to ${widget.targetLang}:',
+                              style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Color(0xFF2F80ED)),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 6),
+                        Text(
+                          _translatedPreview,
+                          style: const TextStyle(fontSize: 12, color: Colors.white, height: 1.3),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+
                 const SizedBox(height: 14),
                 Wrap(
                   spacing: 8,
@@ -212,14 +293,20 @@ class _TransmittingScreenState extends State<TransmittingScreen> {
                         style: const TextStyle(fontSize: 11, color: Colors.white70),
                       ),
                       onPressed: () {
+                        final trans = EdgeMlEngine().processTransmission(
+                          rawText: phrase,
+                          sourceLang: 'English',
+                          targetLang: widget.targetLang,
+                        );
                         setState(() {
                           _textController.text = phrase;
+                          _translatedPreview = trans.translatedText;
                         });
                       },
                     );
                   }).toList(),
                 ),
-                const SizedBox(height: 24),
+                const SizedBox(height: 20),
                 SizedBox(
                   width: double.infinity,
                   height: 48,

@@ -2,6 +2,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import '../transceiver_engine.dart';
 import '../speech_engine.dart';
+import '../geo_engine.dart';
 import 'transmitting_screen.dart';
 import 'sos_emergency_screen.dart';
 import 'peers_screen.dart';
@@ -24,6 +25,7 @@ class MeshHomeScreen extends StatefulWidget {
 class _MeshHomeScreenState extends State<MeshHomeScreen> {
   int _currentTabIndex = 0;
   bool _isWalkieTalkie = true;
+  bool _isSosScreenOpen = false;
   StreamSubscription? _packetSub;
 
   @override
@@ -33,13 +35,11 @@ class _MeshHomeScreenState extends State<MeshHomeScreen> {
 
     _packetSub = TransceiverEngine().packetStream.listen((packet) {
       if (packet.type == PacketType.prioritySos && mounted) {
-        final alertText = SpeechEngine().translateOrEcho(
-          rawText: packet.content,
-          targetLang: widget.englishLanguage,
-        );
+        if (_isSosScreenOpen) return;
+        _isSosScreenOpen = true;
 
         SpeechEngine().playEmergencyAlert(
-          text: alertText,
+          text: packet.content,
           language: widget.englishLanguage,
         );
 
@@ -48,31 +48,45 @@ class _MeshHomeScreenState extends State<MeshHomeScreen> {
           MaterialPageRoute(
             builder: (_) => SosEmergencyScreen(
               sender: packet.senderName,
-              alertText: alertText,
+              alertText: packet.content,
               hops: packet.hops,
               language: widget.englishLanguage,
+              incidentLat: packet.latitude,
+              incidentLon: packet.longitude,
             ),
           ),
-        );
+        ).then((_) {
+          _isSosScreenOpen = false;
+        });
       } else if (packet.type == PacketType.voiceText && mounted) {
-        final spokenText = SpeechEngine().translateOrEcho(
-          rawText: packet.content,
-          targetLang: widget.englishLanguage,
-        );
-
         SpeechEngine().playVoiceNote(
-          text: spokenText,
+          text: packet.content,
           language: widget.englishLanguage,
         );
 
+        final distanceMeters = GeoEngine().calculateDistance(
+          GeoEngine().currentLocation,
+          GeoCoordinates(latitude: packet.latitude, longitude: packet.longitude),
+        );
+        final distStr = GeoEngine().formatDistance(distanceMeters);
+
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            backgroundColor: const Color(0xFF1E232B),
-            content: Text(
-              '📥 [${packet.senderName} (${packet.sourceLang})]: "$spokenText"',
-              style: const TextStyle(color: Colors.white),
+            backgroundColor: const Color(0xFF161A22),
+            content: Row(
+              children: [
+                const Icon(Icons.record_voice_over, color: Color(0xFF27AE60), size: 16),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    '${packet.senderName} ($distStr away): "${packet.content}"',
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(color: Colors.white, fontSize: 12),
+                  ),
+                ),
+              ],
             ),
-            duration: const Duration(seconds: 5),
+            duration: const Duration(seconds: 4),
           ),
         );
       }
@@ -83,6 +97,40 @@ class _MeshHomeScreenState extends State<MeshHomeScreen> {
   void dispose() {
     _packetSub?.cancel();
     super.dispose();
+  }
+
+  void _triggerSosBroadcast(TransceiverEngine engine) {
+    if (_isSosScreenOpen) return;
+    _isSosScreenOpen = true;
+
+    const alertMsg = 'evacuation';
+    engine.broadcastSos(alertText: alertMsg);
+
+    final localAlert = SpeechEngine().translateOrEcho(
+      rawText: alertMsg,
+      targetLang: widget.englishLanguage,
+    );
+
+    SpeechEngine().playEmergencyAlert(
+      text: localAlert,
+      language: widget.englishLanguage,
+    );
+
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => SosEmergencyScreen(
+          sender: engine.nodeName,
+          alertText: localAlert,
+          hops: 1,
+          language: widget.englishLanguage,
+          incidentLat: GeoEngine().currentLocation.latitude,
+          incidentLon: GeoEngine().currentLocation.longitude,
+        ),
+      ),
+    ).then((_) {
+      _isSosScreenOpen = false;
+    });
   }
 
   @override
@@ -112,7 +160,6 @@ class _MeshHomeScreenState extends State<MeshHomeScreen> {
       body: SafeArea(
         child: Column(
           children: [
-            // Network & Diagnostics Bar
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 8.0),
               child: Row(
@@ -162,8 +209,6 @@ class _MeshHomeScreenState extends State<MeshHomeScreen> {
                 ],
               ),
             ),
-
-            // Live Diagnostic Status Strip
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 4.0),
               child: Container(
@@ -208,8 +253,6 @@ class _MeshHomeScreenState extends State<MeshHomeScreen> {
                 ),
               ),
             ),
-
-            // App Header
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 6.0),
               child: Row(
@@ -266,8 +309,6 @@ class _MeshHomeScreenState extends State<MeshHomeScreen> {
                 ],
               ),
             ),
-
-            // Walkie-Talkie vs Phone Switcher
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 6.0),
               child: Container(
@@ -326,7 +367,6 @@ class _MeshHomeScreenState extends State<MeshHomeScreen> {
                 ),
               ),
             ),
-
             const Padding(
               padding: EdgeInsets.symmetric(horizontal: 16.0, vertical: 6.0),
               child: Row(
@@ -345,8 +385,6 @@ class _MeshHomeScreenState extends State<MeshHomeScreen> {
                 ],
               ),
             ),
-
-            // Discovered Peers List
             Expanded(
               child: StreamBuilder<List<DiscoveredPeer>>(
                 stream: engine.peerStream,
@@ -374,6 +412,7 @@ class _MeshHomeScreenState extends State<MeshHomeScreen> {
                     itemCount: peers.length,
                     itemBuilder: (context, index) {
                       final peer = peers[index];
+                      final dist = GeoEngine().formatDistance(peer.distanceMeters);
                       return Container(
                         margin: const EdgeInsets.only(bottom: 8),
                         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
@@ -401,7 +440,7 @@ class _MeshHomeScreenState extends State<MeshHomeScreen> {
                                       style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
                                   const SizedBox(height: 2),
                                   Text(
-                                    '${peer.language}  ·  ${peer.ip}  ·  ${peer.id}',
+                                    '${peer.language}  ·  $dist  ·  ${peer.hops} hop  ·  ${peer.id}',
                                     style: const TextStyle(fontSize: 11, color: Colors.white54),
                                   ),
                                 ],
@@ -416,8 +455,6 @@ class _MeshHomeScreenState extends State<MeshHomeScreen> {
                 },
               ),
             ),
-
-            // PTT Action Button
             Padding(
               padding: const EdgeInsets.symmetric(vertical: 6.0),
               child: GestureDetector(
@@ -484,8 +521,6 @@ class _MeshHomeScreenState extends State<MeshHomeScreen> {
               style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, letterSpacing: 0.8),
             ),
             const SizedBox(height: 10),
-
-            // Emergency SOS Bar
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 16.0),
               child: SizedBox(
@@ -497,32 +532,7 @@ class _MeshHomeScreenState extends State<MeshHomeScreen> {
                     shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
                     elevation: 0,
                   ),
-                  onPressed: () {
-                    const alertMsg = 'evacuation';
-                    engine.broadcastSos(alertText: alertMsg);
-
-                    final localAlert = SpeechEngine().translateOrEcho(
-                      rawText: alertMsg,
-                      targetLang: widget.englishLanguage,
-                    );
-
-                    SpeechEngine().playEmergencyAlert(
-                      text: localAlert,
-                      language: widget.englishLanguage,
-                    );
-
-                    Navigator.push(
-                      context,
-                      MaterialPageRoute(
-                        builder: (_) => SosEmergencyScreen(
-                          sender: engine.nodeName,
-                          alertText: localAlert,
-                          hops: 1,
-                          language: widget.englishLanguage,
-                        ),
-                      ),
-                    );
-                  },
+                  onPressed: () => _triggerSosBroadcast(engine),
                   child: const Row(
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [

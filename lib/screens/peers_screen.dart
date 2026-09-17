@@ -83,7 +83,11 @@ class PeersScreen extends StatelessWidget {
                   decoration: BoxDecoration(
                     color: const Color(0xFF161A22),
                     borderRadius: BorderRadius.circular(14),
-                    border: Border.all(color: Colors.white10),
+                    border: Border.all(
+                      color: peer.isSimulated
+                          ? const Color(0xFF2F80ED).withValues(alpha: 0.3)
+                          : Colors.white10,
+                    ),
                   ),
                   child: Row(
                     children: [
@@ -115,22 +119,31 @@ class PeersScreen extends StatelessWidget {
                                   ),
                                 ),
                                 const SizedBox(width: 6),
-                                const Icon(Icons.lock, size: 12, color: Color(0xFF27AE60)),
+                                Icon(
+                                  peer.isSimulated ? Icons.auto_awesome : Icons.lock,
+                                  size: 12,
+                                  color: peer.isSimulated ? const Color(0xFF2F80ED) : const Color(0xFF27AE60),
+                                ),
                               ],
                             ),
                             const SizedBox(height: 3),
                             Text(
-                              '${peer.language}  ·  ${peer.hops} hop  ·  ${peer.id}',
+                              '${peer.language}  ·  ${peer.hops} hop${peer.hops > 1 ? 's' : ''}  ·  ${peer.id}',
                               style: const TextStyle(fontSize: 11, color: Colors.white54),
                             ),
                             const SizedBox(height: 4),
-                            const Row(
+                            Row(
                               children: [
-                                Icon(Icons.signal_cellular_alt, size: 12, color: Color(0xFF27AE60)),
-                                SizedBox(width: 4),
+                                Icon(Icons.signal_cellular_alt, size: 12, color: peer.hops == 1 ? const Color(0xFF27AE60) : const Color(0xFFF2994A)),
+                                const SizedBox(width: 4),
                                 Text(
-                                  '-54 dBm (Direct P2P Link)',
-                                  style: TextStyle(fontSize: 10, color: Color(0xFF27AE60)),
+                                  peer.hops == 1
+                                      ? '-52 dBm (Direct P2P Link)'
+                                      : '-78 dBm (Multi-Hop Mesh Relay)',
+                                  style: TextStyle(
+                                    fontSize: 10,
+                                    color: peer.hops == 1 ? const Color(0xFF27AE60) : const Color(0xFFF2994A),
+                                  ),
                                 ),
                               ],
                             ),
