@@ -8,7 +8,6 @@ class SpeechEngine {
   final FlutterTts _flutterTts = FlutterTts();
   bool _isInitialized = false;
 
-  // Language to BCP-47 locale mapping for the 10 Indian Languages[cite: 1]
   static const Map<String, String> _localeMap = {
     'Malayalam': 'ml-IN',
     'Hindi': 'hi-IN',
@@ -22,7 +21,6 @@ class SpeechEngine {
     'English': 'en-IN',
   };
 
-  // Pre-cached emergency phrase translations for pivot routing (IndicTrans2 fallback)[cite: 1]
   static const Map<String, Map<String, String>> _phraseBook = {
     'evacuation': {
       'English': 'Evacuate immediately. Proceed to the shelter on Hill Top.',
@@ -32,7 +30,7 @@ class SpeechEngine {
       'Tamil': 'உடனடியாக வெளியேறவும். ஹில் டாப் முகாமிற்கு செல்லவும்.',
       'Telugu': 'వెంటనే ఖాళీ చేయండి. హిల్ టాప్ ఆశ్రయానికి వెళ్లండి.',
       'Kannada': 'ತಕ್ಷಣವೇ ಖಾಲಿ ಮಾಡಿ. ಹಿಲ್ ಟಾಪ್ ಆಶ್ರಯಕ್ಕೆ ತೆರಳಿ.',
-      'Marathi': 'त्वरित सुरक्षित स्थळी स्थळांतर करा. हिल टॉप निवाऱ्याकडे जा.',
+      'Marathi': 'त्वरित सुरक्षित स्थळी स्थળાंतर करा. हिल टॉप निवाऱ्याकडे जा.',
       'Gujarati': 'તરત જ સુરક્ષિત સ્થળે ખસી જાઓ. હિલ ટોપ શેલ્ટર તરફ આગળ વધો.',
       'Odia': 'ତୁରନ୍ତ ସୁରକ୍ଷିତ ସ୍ଥାନକୁ ଯାଆନ୍ତୁ। ହିଲ୍ ଟପ୍ ଆଶ୍ରୟସ୍ଥଳକୁ ଯାଆନ୍ତୁ।',
     },
@@ -54,16 +52,20 @@ class SpeechEngine {
     if (_isInitialized) return;
     await _flutterTts.setPitch(1.0);
     await _flutterTts.setSpeechRate(0.48);
+    await _flutterTts.setVolume(1.0);
     _isInitialized = true;
   }
 
-  String translatePhrase({
-    required String phraseKey,
+  String translateOrEcho({
+    required String rawText,
     required String targetLang,
   }) {
-    return _phraseBook[phraseKey]?[targetLang] ??
-        _phraseBook[phraseKey]?['English'] ??
-        phraseKey;
+    if (_phraseBook.containsKey(rawText)) {
+      return _phraseBook[rawText]?[targetLang] ??
+          _phraseBook[rawText]?['English'] ??
+          rawText;
+    }
+    return rawText;
   }
 
   Future<void> playVoiceNote({
@@ -72,8 +74,15 @@ class SpeechEngine {
   }) async {
     await init();
     final locale = _localeMap[language] ?? 'en-IN';
-    await _flutterTts.setLanguage(locale);
-    await _flutterTts.setVolume(0.85);
+    final isSupported = await _flutterTts.isLanguageAvailable(locale);
+
+    if (isSupported == 1 || isSupported == true) {
+      await _flutterTts.setLanguage(locale);
+    } else {
+      await _flutterTts.setLanguage('en-IN');
+    }
+
+    await _flutterTts.setVolume(0.9);
     await _flutterTts.speak(text);
   }
 
@@ -83,8 +92,14 @@ class SpeechEngine {
   }) async {
     await init();
     final locale = _localeMap[language] ?? 'en-IN';
-    await _flutterTts.setLanguage(locale);
-    // Highest volume non-interruptible output as specified in Section 4.3.2[cite: 1]
+    final isSupported = await _flutterTts.isLanguageAvailable(locale);
+
+    if (isSupported == 1 || isSupported == true) {
+      await _flutterTts.setLanguage(locale);
+    } else {
+      await _flutterTts.setLanguage('en-IN');
+    }
+
     await _flutterTts.setVolume(1.0);
     await _flutterTts.setSpeechRate(0.42);
     await _flutterTts.speak(text);

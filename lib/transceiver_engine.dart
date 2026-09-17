@@ -77,6 +77,7 @@ class TransceiverEngine {
   late String nodeId;
   late String nodeName;
   late String primaryLanguage;
+  String localIp = '127.0.0.1';
 
   final Map<String, DiscoveredPeer> _activePeers = {};
   final _peerStreamController =
@@ -97,11 +98,13 @@ class TransceiverEngine {
     nodeName = name;
     primaryLanguage = language;
 
+    await _findLocalIp();
+
     _socket = await RawDatagramSocket.bind(
       InternetAddress.anyIPv4,
       meshPort,
       reuseAddress: true,
-      reusePort: true,
+      reusePort: false,
     );
     _socket?.broadcastEnabled = true;
 
@@ -114,11 +117,55 @@ class TransceiverEngine {
       }
     });
 
-    // Broadcast node presence every 3 seconds to keep mesh peer table warm[cite: 1, 5]
-    _beaconTimer = Timer.periodic(const Duration(seconds: 3), (_) {
+    _sendBeacon();
+
+    _beaconTimer?.cancel();
+    _beaconTimer = Timer.periodic(const Duration(seconds: 2), (_) {
       _sendBeacon();
       _pruneStalePeers();
     });
+  }
+
+  Future<void> _findLocalIp() async {
+    try {
+      final interfaces = await NetworkInterface.list(
+        type: InternetAddressType.IPv4,
+        includeLoopback: false,
+      );
+      for (var interface in interfaces) {
+        for (var addr in interface.addresses) {
+          if (!addr.isLoopback) {
+            localIp = addr.address;
+            return;
+          }
+        }
+      }
+    } catch (_) {}
+  }
+
+  Future<List<InternetAddress>> _resolveBroadcastDestinations() async {
+    final destinations = <InternetAddress>[
+      InternetAddress('255.255.255.255'),
+    ];
+
+    try {
+      final interfaces = await NetworkInterface.list(
+        type: InternetAddressType.IPv4,
+        includeLoopback: false,
+      );
+      for (var interface in interfaces) {
+        for (var addr in interface.addresses) {
+          final parts = addr.address.split('.');
+          if (parts.length == 4) {
+            destinations.add(
+              InternetAddress('${parts[0]}.${parts[1]}.${parts[2]}.255'),
+            );
+          }
+        }
+      }
+    } catch (_) {}
+
+    return destinations;
   }
 
   void _sendBeacon() {
@@ -128,7 +175,7 @@ class TransceiverEngine {
       senderName: nodeName,
       sourceLang: primaryLanguage,
       targetLang: '',
-      content: 'READY',
+      content: 'PING',
       timestamp: DateTime.now().millisecondsSinceEpoch,
     );
     _broadcast(packet);
@@ -165,11 +212,17 @@ class TransceiverEngine {
     _broadcast(packet);
   }
 
-  void _broadcast(TransceiverPacket packet) {
+  Future<void> _broadcast(TransceiverPacket packet) async {
     if (_socket == null) return;
     final jsonStr = jsonEncode(packet.toJson());
     final data = utf8.encode(jsonStr);
-    _socket?.send(data, InternetAddress('255.255.255.255'), meshPort);
+    final targets = await _resolveBroadcastDestinations();
+
+    for (var destination in targets) {
+      try {
+        _socket?.send(data, destination, meshPort);
+      } catch (_) {}
+    }
   }
 
   void _handleIncomingDatagram(List<int> data) {
@@ -177,10 +230,8 @@ class TransceiverEngine {
       final jsonStr = utf8.decode(data);
       final packet = TransceiverPacket.fromJson(jsonDecode(jsonStr));
 
-      // Disregard self-broadcasts
       if (packet.senderId == nodeId) return;
 
-      // Update peer registry
       _activePeers[packet.senderId] = DiscoveredPeer(
         id: packet.senderId,
         name: packet.senderName,
@@ -190,15 +241,14 @@ class TransceiverEngine {
       );
       _peerStreamController.add(_activePeers.values.toList());
 
-      // Forward packet to application layer
-      _incomingPacketController.add(packet);
-    } catch (_) {
-      // Drop malformed packets to protect mesh integrity[cite: 1]
-    }
+      if (packet.type != PacketType.beacon) {
+        _incomingPacketController.add(packet);
+      }
+    } catch (_) {}
   }
 
   void _pruneStalePeers() {
-    final threshold = DateTime.now().subtract(const Duration(seconds: 10));
+    final threshold = DateTime.now().subtract(const Duration(seconds: 7));
     _activePeers.removeWhere((_, peer) => peer.lastSeen.isBefore(threshold));
     _peerStreamController.add(_activePeers.values.toList());
   }
