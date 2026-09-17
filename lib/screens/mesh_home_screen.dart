@@ -112,6 +112,7 @@ class _MeshHomeScreenState extends State<MeshHomeScreen> {
       body: SafeArea(
         child: Column(
           children: [
+            // Network & Diagnostics Bar
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 8.0),
               child: Row(
@@ -161,8 +162,56 @@ class _MeshHomeScreenState extends State<MeshHomeScreen> {
                 ],
               ),
             ),
+
+            // Live Diagnostic Status Strip
             Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 8.0),
+              padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 4.0),
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                decoration: BoxDecoration(
+                  color: const Color(0xFF161A22),
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: Colors.white10),
+                ),
+                child: Row(
+                  children: [
+                    ValueListenableBuilder<int>(
+                      valueListenable: engine.packetsSentNotifier,
+                      builder: (_, sent, __) => Text('TX: $sent  ', style: const TextStyle(fontSize: 10, color: Color(0xFF2F80ED))),
+                    ),
+                    ValueListenableBuilder<int>(
+                      valueListenable: engine.packetsReceivedNotifier,
+                      builder: (_, rx, __) => Text('RX: $rx  ', style: const TextStyle(fontSize: 10, color: Color(0xFF27AE60))),
+                    ),
+                    Expanded(
+                      child: ValueListenableBuilder<String>(
+                        valueListenable: engine.logNotifier,
+                        builder: (_, log, __) => Text(
+                          log,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(fontSize: 10, color: Colors.white54),
+                        ),
+                      ),
+                    ),
+                    InkWell(
+                      onTap: () => engine.forceBeacon(),
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFF2F80ED).withValues(alpha: 0.2),
+                          borderRadius: BorderRadius.circular(4),
+                        ),
+                        child: const Text('PING', style: TextStyle(fontSize: 9, color: Color(0xFF2F80ED), fontWeight: FontWeight.bold)),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+
+            // App Header
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 6.0),
               child: Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
@@ -217,6 +266,8 @@ class _MeshHomeScreenState extends State<MeshHomeScreen> {
                 ],
               ),
             ),
+
+            // Walkie-Talkie vs Phone Switcher
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 6.0),
               child: Container(
@@ -275,8 +326,9 @@ class _MeshHomeScreenState extends State<MeshHomeScreen> {
                 ),
               ),
             ),
+
             const Padding(
-              padding: EdgeInsets.symmetric(horizontal: 16.0, vertical: 8.0),
+              padding: EdgeInsets.symmetric(horizontal: 16.0, vertical: 6.0),
               child: Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
@@ -284,7 +336,7 @@ class _MeshHomeScreenState extends State<MeshHomeScreen> {
                       style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: Colors.white)),
                   Row(
                     children: [
-                      Text('Auto-Sync Active',
+                      Text('Subnet Auto-Sync',
                           style: TextStyle(fontSize: 11, color: Color(0xFF27AE60))),
                       SizedBox(width: 4),
                       Icon(Icons.sync, size: 14, color: Color(0xFF27AE60)),
@@ -293,6 +345,8 @@ class _MeshHomeScreenState extends State<MeshHomeScreen> {
                 ],
               ),
             ),
+
+            // Discovered Peers List
             Expanded(
               child: StreamBuilder<List<DiscoveredPeer>>(
                 stream: engine.peerStream,
@@ -304,12 +358,12 @@ class _MeshHomeScreenState extends State<MeshHomeScreen> {
                       child: Column(
                         mainAxisAlignment: MainAxisAlignment.center,
                         children: [
-                          Icon(Icons.radar, size: 42, color: Colors.white24),
-                          SizedBox(height: 8),
+                          Icon(Icons.radar, size: 38, color: Colors.white24),
+                          SizedBox(height: 6),
                           Text(
-                            'Scanning subnet broadcast...\nEnsure devices are on the same Wi-Fi or Hotspot.',
+                            'Scanning subnet broadcast...\nConnect 2 devices to the same Hotspot or Wi-Fi.',
                             textAlign: TextAlign.center,
-                            style: TextStyle(fontSize: 12, color: Colors.white38),
+                            style: TextStyle(fontSize: 11, color: Colors.white38),
                           ),
                         ],
                       ),
@@ -347,7 +401,7 @@ class _MeshHomeScreenState extends State<MeshHomeScreen> {
                                       style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
                                   const SizedBox(height: 2),
                                   Text(
-                                    '${peer.language}  ·  ${peer.hops} hop  ·  ${peer.id}',
+                                    '${peer.language}  ·  ${peer.ip}  ·  ${peer.id}',
                                     style: const TextStyle(fontSize: 11, color: Colors.white54),
                                   ),
                                 ],
@@ -362,8 +416,10 @@ class _MeshHomeScreenState extends State<MeshHomeScreen> {
                 },
               ),
             ),
+
+            // PTT Action Button
             Padding(
-              padding: const EdgeInsets.symmetric(vertical: 8.0),
+              padding: const EdgeInsets.symmetric(vertical: 6.0),
               child: GestureDetector(
                 onTap: () {
                   Navigator.push(
@@ -376,8 +432,8 @@ class _MeshHomeScreenState extends State<MeshHomeScreen> {
                   );
                 },
                 child: Container(
-                  width: 140,
-                  height: 140,
+                  width: 130,
+                  height: 130,
                   decoration: BoxDecoration(
                     shape: BoxShape.circle,
                     color: const Color(0xFF1C2430),
@@ -391,8 +447,8 @@ class _MeshHomeScreenState extends State<MeshHomeScreen> {
                   ),
                   child: Center(
                     child: Container(
-                      width: 104,
-                      height: 104,
+                      width: 96,
+                      height: 96,
                       decoration: const BoxDecoration(
                         shape: BoxShape.circle,
                         color: Color(0xFF2F80ED),
@@ -403,7 +459,7 @@ class _MeshHomeScreenState extends State<MeshHomeScreen> {
                           Icon(
                             _isWalkieTalkie ? Icons.mic : Icons.phone_in_talk,
                             color: Colors.white,
-                            size: 30,
+                            size: 28,
                           ),
                           const SizedBox(height: 4),
                           Text(
@@ -427,13 +483,9 @@ class _MeshHomeScreenState extends State<MeshHomeScreen> {
               _isWalkieTalkie ? 'READY TO BROADCAST' : 'LIVE DUPLEX PHONE MODE',
               style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, letterSpacing: 0.8),
             ),
-            const SizedBox(height: 2),
-            const Text(
-              'Transmits voice text across subnet nodes',
-              textAlign: TextAlign.center,
-              style: TextStyle(fontSize: 11, color: Colors.white54),
-            ),
-            const SizedBox(height: 12),
+            const SizedBox(height: 10),
+
+            // Emergency SOS Bar
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 16.0),
               child: SizedBox(
@@ -493,7 +545,7 @@ class _MeshHomeScreenState extends State<MeshHomeScreen> {
                 ),
               ),
             ),
-            const SizedBox(height: 12),
+            const SizedBox(height: 10),
             _buildBottomNav(),
           ],
         ),

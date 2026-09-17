@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'package:flutter/foundation.dart';
 
 enum PacketType { beacon, voiceText, prioritySos }
 
@@ -53,6 +54,7 @@ class DiscoveredPeer {
   final String id;
   final String name;
   final String language;
+  final String ip;
   DateTime lastSeen;
   int hops;
 
@@ -60,6 +62,7 @@ class DiscoveredPeer {
     required this.id,
     required this.name,
     required this.language,
+    required this.ip,
     required this.lastSeen,
     this.hops = 1,
   });
@@ -79,15 +82,16 @@ class TransceiverEngine {
   late String primaryLanguage;
   String localIp = '127.0.0.1';
 
+  final ValueNotifier<int> packetsSentNotifier = ValueNotifier<int>(0);
+  final ValueNotifier<int> packetsReceivedNotifier = ValueNotifier<int>(0);
+  final ValueNotifier<String> logNotifier = ValueNotifier<String>('Initialized');
+
   final Map<String, DiscoveredPeer> _activePeers = {};
-  final _peerStreamController =
-      StreamController<List<DiscoveredPeer>>.broadcast();
-  final _incomingPacketController =
-      StreamController<TransceiverPacket>.broadcast();
+  final _peerStreamController = StreamController<List<DiscoveredPeer>>.broadcast();
+  final _incomingPacketController = StreamController<TransceiverPacket>.broadcast();
 
   Stream<List<DiscoveredPeer>> get peerStream => _peerStreamController.stream;
-  Stream<TransceiverPacket> get packetStream =>
-      _incomingPacketController.stream;
+  Stream<TransceiverPacket> get packetStream => _incomingPacketController.stream;
   List<DiscoveredPeer> get currentPeers => _activePeers.values.toList();
 
   Future<void> start({
@@ -98,43 +102,55 @@ class TransceiverEngine {
     nodeName = name;
     primaryLanguage = language;
 
-    await _findLocalIp();
+    await _refreshLocalIp();
 
-    _socket = await RawDatagramSocket.bind(
-      InternetAddress.anyIPv4,
-      meshPort,
-      reuseAddress: true,
-      reusePort: false,
-    );
-    _socket?.broadcastEnabled = true;
+    try {
+      _socket = await RawDatagramSocket.bind(
+        InternetAddress.anyIPv4,
+        meshPort,
+        reuseAddress: true,
+        reusePort: false,
+      );
+      _socket?.broadcastEnabled = true;
 
-    _socket?.listen((RawSocketEvent event) {
-      if (event == RawSocketEvent.read) {
-        final datagram = _socket?.receive();
-        if (datagram != null) {
-          _handleIncomingDatagram(datagram.data);
-        }
-      }
-    });
+      _socket?.listen(
+        (RawSocketEvent event) {
+          if (event == RawSocketEvent.read) {
+            final datagram = _socket?.receive();
+            if (datagram != null) {
+              _handleIncomingDatagram(datagram);
+            }
+          }
+        },
+        onError: (err) {
+          logNotifier.value = 'Socket error: $err';
+        },
+      );
+
+      logNotifier.value = 'Bound on $localIp:$meshPort';
+    } catch (e) {
+      logNotifier.value = 'Bind failed: $e';
+    }
 
     _sendBeacon();
 
     _beaconTimer?.cancel();
     _beaconTimer = Timer.periodic(const Duration(seconds: 2), (_) {
+      _refreshLocalIp();
       _sendBeacon();
       _pruneStalePeers();
     });
   }
 
-  Future<void> _findLocalIp() async {
+  Future<void> _refreshLocalIp() async {
     try {
       final interfaces = await NetworkInterface.list(
         type: InternetAddressType.IPv4,
         includeLoopback: false,
       );
-      for (var interface in interfaces) {
-        for (var addr in interface.addresses) {
-          if (!addr.isLoopback) {
+      for (var iface in interfaces) {
+        for (var addr in iface.addresses) {
+          if (!addr.isLoopback && addr.address != '127.0.0.1') {
             localIp = addr.address;
             return;
           }
@@ -143,23 +159,28 @@ class TransceiverEngine {
     } catch (_) {}
   }
 
-  Future<List<InternetAddress>> _resolveBroadcastDestinations() async {
-    final destinations = <InternetAddress>[
+  Future<Set<InternetAddress>> _resolveBroadcastDestinations() async {
+    final destinations = <InternetAddress>{
       InternetAddress('255.255.255.255'),
-    ];
+      InternetAddress('192.168.43.255'), // Standard Android Hotspot Broadcast
+      InternetAddress('192.168.43.1'),   // Hotspot Gateway Node
+    };
 
     try {
       final interfaces = await NetworkInterface.list(
         type: InternetAddressType.IPv4,
         includeLoopback: false,
       );
-      for (var interface in interfaces) {
-        for (var addr in interface.addresses) {
-          final parts = addr.address.split('.');
-          if (parts.length == 4) {
-            destinations.add(
-              InternetAddress('${parts[0]}.${parts[1]}.${parts[2]}.255'),
-            );
+      for (var iface in interfaces) {
+        for (var addr in iface.addresses) {
+          if (!addr.isLoopback) {
+            final parts = addr.address.split('.');
+            if (parts.length == 4) {
+              // Direct subnet broadcast
+              destinations.add(InternetAddress('${parts[0]}.${parts[1]}.${parts[2]}.255'));
+              // Direct gateway probe
+              destinations.add(InternetAddress('${parts[0]}.${parts[1]}.${parts[2]}.1'));
+            }
           }
         }
       }
@@ -175,7 +196,7 @@ class TransceiverEngine {
       senderName: nodeName,
       sourceLang: primaryLanguage,
       targetLang: '',
-      content: 'PING',
+      content: 'BEACON_PING',
       timestamp: DateTime.now().millisecondsSinceEpoch,
     );
     _broadcast(packet);
@@ -214,43 +235,68 @@ class TransceiverEngine {
 
   Future<void> _broadcast(TransceiverPacket packet) async {
     if (_socket == null) return;
-    final jsonStr = jsonEncode(packet.toJson());
-    final data = utf8.encode(jsonStr);
-    final targets = await _resolveBroadcastDestinations();
 
-    for (var destination in targets) {
-      try {
-        _socket?.send(data, destination, meshPort);
-      } catch (_) {}
+    try {
+      final jsonStr = jsonEncode(packet.toJson());
+      final data = utf8.encode(jsonStr);
+      final destinations = await _resolveBroadcastDestinations();
+
+      for (var target in destinations) {
+        try {
+          _socket?.send(data, target, meshPort);
+        } catch (_) {}
+      }
+
+      packetsSentNotifier.value++;
+      logNotifier.value = 'Sent ${packet.type.name} to ${destinations.length} targets';
+    } catch (e) {
+      logNotifier.value = 'Broadcast fail: $e';
     }
   }
 
-  void _handleIncomingDatagram(List<int> data) {
+  void _handleIncomingDatagram(Datagram datagram) {
     try {
-      final jsonStr = utf8.decode(data);
+      final jsonStr = utf8.decode(datagram.data);
       final packet = TransceiverPacket.fromJson(jsonDecode(jsonStr));
 
+      // Ignore packets sent by this own node
       if (packet.senderId == nodeId) return;
+
+      packetsReceivedNotifier.value++;
+      final senderIp = datagram.address.address;
 
       _activePeers[packet.senderId] = DiscoveredPeer(
         id: packet.senderId,
         name: packet.senderName,
         language: packet.sourceLang,
+        ip: senderIp,
         lastSeen: DateTime.now(),
         hops: packet.hops,
       );
+
       _peerStreamController.add(_activePeers.values.toList());
+      logNotifier.value = 'Received from ${packet.senderName} ($senderIp)';
 
       if (packet.type != PacketType.beacon) {
         _incomingPacketController.add(packet);
       }
-    } catch (_) {}
+    } catch (e) {
+      logNotifier.value = 'Packet parse error: $e';
+    }
   }
 
   void _pruneStalePeers() {
-    final threshold = DateTime.now().subtract(const Duration(seconds: 7));
+    final threshold = DateTime.now().subtract(const Duration(seconds: 8));
+    final beforeCount = _activePeers.length;
     _activePeers.removeWhere((_, peer) => peer.lastSeen.isBefore(threshold));
-    _peerStreamController.add(_activePeers.values.toList());
+
+    if (beforeCount != _activePeers.length) {
+      _peerStreamController.add(_activePeers.values.toList());
+    }
+  }
+
+  void forceBeacon() {
+    _sendBeacon();
   }
 
   void stop() {
