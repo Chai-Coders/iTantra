@@ -1,4 +1,3 @@
-import 'dart:io';
 import 'package:flutter_tts/flutter_tts.dart';
 
 class SpeechEngine {
@@ -9,7 +8,7 @@ class SpeechEngine {
   final FlutterTts _flutterTts = FlutterTts();
   bool _isInitialized = false;
 
-  // Language to BCP-47 locale mapping for the 10 Indian Languages
+  // Language to BCP-47 locale mapping for the 10 Indian Languages[cite: 1]
   static const Map<String, String> _localeMap = {
     'Malayalam': 'ml-IN',
     'Hindi': 'hi-IN',
@@ -23,7 +22,7 @@ class SpeechEngine {
     'English': 'en-IN',
   };
 
-  // Pre-cached emergency phrase translations for pivot routing (IndicTrans2 fallback)
+  // Pre-cached emergency phrase translations for pivot routing (IndicTrans2 fallback)[cite: 1]
   static const Map<String, Map<String, String>> _phraseBook = {
     'evacuation': {
       'English': 'Evacuate immediately. Proceed to the shelter on Hill Top.',
@@ -33,7 +32,7 @@ class SpeechEngine {
       'Tamil': 'உடனடியாக வெளியேறவும். ஹில் டாப் முகாமிற்கு செல்லவும்.',
       'Telugu': 'వెంటనే ఖాళీ చేయండి. హిల్ టాప్ ఆశ్రయానికి వెళ్లండి.',
       'Kannada': 'ತಕ್ಷಣವೇ ಖಾಲಿ ಮಾಡಿ. ಹಿಲ್ ಟಾಪ್ ಆಶ್ರಯಕ್ಕೆ ತೆರಳಿ.',
-      'Marathi': 'त्वरित सुरक्षित स्थळी स्थળાंतर करा. हिल टॉप निवाऱ्याकडे जा.',
+      'Marathi': 'त्वरित सुरक्षित स्थळी स्थळांतर करा. हिल टॉप निवाऱ्याकडे जा.',
       'Gujarati': 'તરત જ સુરક્ષિત સ્થળે ખસી જાઓ. હિલ ટોપ શેલ્ટર તરફ આગળ વધો.',
       'Odia': 'ତୁରନ୍ତ ସୁରକ୍ଷିତ ସ୍ଥାନକୁ ଯାଆନ୍ତୁ। ହିଲ୍ ଟପ୍ ଆଶ୍ରୟସ୍ଥଳକୁ ଯାଆନ୍ତୁ।',
     },
