@@ -2,6 +2,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import '../transceiver_engine.dart';
 import '../speech_engine.dart';
+import '../ml_engine.dart';
 import '../geo_engine.dart';
 import 'transmitting_screen.dart';
 import 'sos_emergency_screen.dart';
@@ -28,19 +29,51 @@ class _MeshHomeScreenState extends State<MeshHomeScreen> {
   bool _isSosScreenOpen = false;
   StreamSubscription? _packetSub;
 
+  late String _activeLanguage;
+
+  final List<Map<String, String>> _supportedLanguages = const [
+    {'name': 'English', 'native': 'English'},
+    {'name': 'Malayalam', 'native': 'മലയാളം'},
+    {'name': 'Hindi', 'native': 'हिन्दी'},
+    {'name': 'Tamil', 'native': 'தமிழ்'},
+    {'name': 'Telugu', 'native': 'తెలుగు'},
+    {'name': 'Kannada', 'native': 'ಕನ್ನಡ'},
+    {'name': 'Bengali', 'native': 'বাংলা'},
+    {'name': 'Marathi', 'native': 'मराठी'},
+    {'name': 'Gujarati', 'native': 'ગુજરાતી'},
+    {'name': 'Odia', 'native': 'ଓଡ଼ିଆ'},
+  ];
+
   @override
   void initState() {
     super.initState();
     SpeechEngine().init();
 
+    // Normalize active language on device
+    _activeLanguage = EdgeMlEngine().normalizeLanguage(
+      widget.englishLanguage.isNotEmpty ? widget.englishLanguage : widget.selectedLanguage,
+    );
+
+    TransceiverEngine().updateLanguage(_activeLanguage);
+
     _packetSub = TransceiverEngine().packetStream.listen((packet) {
+      // 1. Resolve receiver device's active chosen language
+      final myLang = EdgeMlEngine().normalizeLanguage(_activeLanguage);
+
+      // 2. Translate English Mesh Pivot -> Receiver device's native language
+      final translatedToMyLanguage = EdgeMlEngine().translateFromEnglishPivot(
+        packet.content,
+        myLang,
+      );
+
       if (packet.type == PacketType.prioritySos && mounted) {
         if (_isSosScreenOpen) return;
         _isSosScreenOpen = true;
 
+        // Play alert audio in receiver's language
         SpeechEngine().playEmergencyAlert(
-          text: packet.content,
-          language: widget.englishLanguage,
+          text: translatedToMyLanguage,
+          language: myLang,
         );
 
         Navigator.push(
@@ -48,9 +81,9 @@ class _MeshHomeScreenState extends State<MeshHomeScreen> {
           MaterialPageRoute(
             builder: (_) => SosEmergencyScreen(
               sender: packet.senderName,
-              alertText: packet.content,
+              alertText: translatedToMyLanguage,
               hops: packet.hops,
-              language: widget.englishLanguage,
+              language: myLang,
               incidentLat: packet.latitude,
               incidentLon: packet.longitude,
             ),
@@ -59,9 +92,10 @@ class _MeshHomeScreenState extends State<MeshHomeScreen> {
           _isSosScreenOpen = false;
         });
       } else if (packet.type == PacketType.voiceText && mounted) {
+        // Synthesize received voice in receiver's local language
         SpeechEngine().playVoiceNote(
-          text: packet.content,
-          language: widget.englishLanguage,
+          text: translatedToMyLanguage,
+          language: myLang,
         );
 
         final distanceMeters = GeoEngine().calculateDistance(
@@ -78,19 +112,86 @@ class _MeshHomeScreenState extends State<MeshHomeScreen> {
                 const Icon(Icons.record_voice_over, color: Color(0xFF27AE60), size: 16),
                 const SizedBox(width: 8),
                 Expanded(
-                  child: Text(
-                    '${packet.senderName} ($distStr away): "${packet.content}"',
-                    overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(color: Colors.white, fontSize: 12),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        '${packet.senderName} ($distStr away): "$translatedToMyLanguage"',
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 12,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                      Text(
+                        'English Pivot: "${packet.content}"',
+                        style: const TextStyle(color: Colors.white54, fontSize: 10),
+                      ),
+                    ],
                   ),
                 ),
               ],
             ),
-            duration: const Duration(seconds: 4),
+            duration: const Duration(seconds: 5),
           ),
         );
       }
     });
+  }
+
+  void _showLanguagePicker() {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: const Color(0xFF161A22),
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+      ),
+      builder: (ctx) {
+        return SafeArea(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Padding(
+                padding: EdgeInsets.all(12.0),
+                child: Text(
+                  'Select This Node\'s Primary Language',
+                  style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: Colors.white),
+                ),
+              ),
+              Expanded(
+                child: ListView.builder(
+                  shrinkWrap: true,
+                  itemCount: _supportedLanguages.length,
+                  itemBuilder: (context, index) {
+                    final item = _supportedLanguages[index];
+                    final isSelected = item['name'] == _activeLanguage;
+                    return ListTile(
+                      title: Text(
+                        '${item['native']} (${item['name']})',
+                        style: TextStyle(
+                          color: isSelected ? const Color(0xFF2F80ED) : Colors.white70,
+                          fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+                        ),
+                      ),
+                      trailing: isSelected ? const Icon(Icons.check, color: Color(0xFF2F80ED)) : null,
+                      onTap: () {
+                        final newLang = item['name']!;
+                        setState(() {
+                          _activeLanguage = newLang;
+                        });
+                        TransceiverEngine().updateLanguage(newLang);
+                        Navigator.pop(ctx);
+                      },
+                    );
+                  },
+                ),
+              ),
+            ],
+          ),
+        );
+      },
+    );
   }
 
   @override
@@ -103,17 +204,17 @@ class _MeshHomeScreenState extends State<MeshHomeScreen> {
     if (_isSosScreenOpen) return;
     _isSosScreenOpen = true;
 
-    const alertMsg = 'evacuation';
-    engine.broadcastSos(alertText: alertMsg);
+    const englishSosPivot = 'evacuate immediately to shelter on hill top';
+    engine.broadcastSos(alertText: englishSosPivot);
 
-    final localAlert = SpeechEngine().translateOrEcho(
-      rawText: alertMsg,
-      targetLang: widget.englishLanguage,
+    final localDisplay = EdgeMlEngine().translateFromEnglishPivot(
+      englishSosPivot,
+      _activeLanguage,
     );
 
     SpeechEngine().playEmergencyAlert(
-      text: localAlert,
-      language: widget.englishLanguage,
+      text: localDisplay,
+      language: _activeLanguage,
     );
 
     Navigator.push(
@@ -121,9 +222,9 @@ class _MeshHomeScreenState extends State<MeshHomeScreen> {
       MaterialPageRoute(
         builder: (_) => SosEmergencyScreen(
           sender: engine.nodeName,
-          alertText: localAlert,
+          alertText: localDisplay,
           hops: 1,
-          language: widget.englishLanguage,
+          language: _activeLanguage,
           incidentLat: GeoEngine().currentLocation.latitude,
           incidentLon: GeoEngine().currentLocation.longitude,
         ),
@@ -138,16 +239,16 @@ class _MeshHomeScreenState extends State<MeshHomeScreen> {
     if (_currentTabIndex == 1) {
       return Scaffold(
         body: PeersScreen(
-          selectedLanguage: widget.selectedLanguage,
-          englishLanguage: widget.englishLanguage,
+          selectedLanguage: _activeLanguage,
+          englishLanguage: _activeLanguage,
         ),
         bottomNavigationBar: _buildBottomNav(),
       );
     } else if (_currentTabIndex == 2) {
       return Scaffold(
         body: SettingsScreen(
-          selectedLanguage: widget.selectedLanguage,
-          englishLanguage: widget.englishLanguage,
+          selectedLanguage: _activeLanguage,
+          englishLanguage: _activeLanguage,
         ),
         bottomNavigationBar: _buildBottomNav(),
       );
@@ -282,20 +383,28 @@ class _MeshHomeScreenState extends State<MeshHomeScreen> {
                   ),
                   Row(
                     children: [
-                      Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-                        decoration: BoxDecoration(
-                          color: const Color(0xFF1E232B),
-                          borderRadius: BorderRadius.circular(16),
-                          border: Border.all(color: Colors.white12),
-                        ),
-                        child: Row(
-                          children: [
-                            const Icon(Icons.translate, size: 14, color: Colors.white70),
-                            const SizedBox(width: 6),
-                            Text(widget.selectedLanguage,
-                                style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
-                          ],
+                      // Tap pill to switch active language
+                      GestureDetector(
+                        onTap: _showLanguagePicker,
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFF1E232B),
+                            borderRadius: BorderRadius.circular(16),
+                            border: Border.all(color: const Color(0xFF2F80ED).withValues(alpha: 0.5)),
+                          ),
+                          child: Row(
+                            children: [
+                              const Icon(Icons.translate, size: 14, color: Color(0xFF2F80ED)),
+                              const SizedBox(width: 6),
+                              Text(
+                                _activeLanguage,
+                                style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Colors.white),
+                              ),
+                              const SizedBox(width: 4),
+                              const Icon(Icons.arrow_drop_down, size: 14, color: Colors.white54),
+                            ],
+                          ),
                         ),
                       ),
                       const SizedBox(width: 8),
@@ -463,7 +572,7 @@ class _MeshHomeScreenState extends State<MeshHomeScreen> {
                     context,
                     MaterialPageRoute(
                       builder: (_) => TransmittingScreen(
-                        targetLang: widget.englishLanguage,
+                        myLanguage: _activeLanguage,
                       ),
                     ),
                   );

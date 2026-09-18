@@ -4,7 +4,6 @@ import 'dart:io';
 import 'dart:math';
 import 'package:flutter/foundation.dart';
 import 'protocol/mesh_codec.dart';
-import 'ml_engine.dart';
 import 'geo_engine.dart';
 
 enum PacketType { beacon, voiceText, prioritySos }
@@ -67,7 +66,7 @@ class TransceiverPacket {
         senderName: json['senderName'] ?? 'Mesh Node',
         relayedBy: json['relayedBy'] ?? '',
         sourceLang: json['sourceLang'] ?? 'English',
-        targetLang: json['targetLang'] ?? 'Malayalam',
+        targetLang: json['targetLang'] ?? 'ALL',
         content: json['content'] ?? '',
         timestamp: json['timestamp'] ?? DateTime.now().millisecondsSinceEpoch,
         hops: json['hops'] ?? 1,
@@ -126,7 +125,7 @@ class TransceiverEngine {
 
   late String nodeId;
   late String nodeName;
-  late String primaryLanguage;
+  String primaryLanguage = 'English';
   String localIp = '127.0.0.1';
 
   bool relayEnabled = true;
@@ -204,6 +203,10 @@ class TransceiverEngine {
     });
   }
 
+  void updateLanguage(String newLang) {
+    primaryLanguage = newLang;
+  }
+
   Future<void> _refreshLocalIp() async {
     try {
       final interfaces = await NetworkInterface.list(
@@ -274,7 +277,7 @@ class TransceiverEngine {
       senderId: nodeId,
       senderName: nodeName,
       sourceLang: primaryLanguage,
-      targetLang: '',
+      targetLang: 'ALL',
       content: 'BEACON_PING',
       timestamp: DateTime.now().millisecondsSinceEpoch,
       hops: 1,
@@ -285,18 +288,13 @@ class TransceiverEngine {
     _broadcast(packet);
   }
 
+  /// Broadcasts voice text encoded in the English pivot to ALL nodes
   void broadcastVoiceText({
-    required String text,
-    required String targetLang,
+    required String englishPivot,
+    String targetLang = 'ALL',
   }) {
     final pid = _generatePacketId();
     _markSeen(pid);
-
-    final payload = EdgeMlEngine().processTransmission(
-      rawText: text,
-      sourceLang: primaryLanguage,
-      targetLang: targetLang,
-    );
 
     final packet = TransceiverPacket(
       packetId: pid,
@@ -305,27 +303,22 @@ class TransceiverEngine {
       senderName: nodeName,
       sourceLang: primaryLanguage,
       targetLang: targetLang,
-      content: payload.translatedText,
+      content: englishPivot,
       timestamp: DateTime.now().millisecondsSinceEpoch,
       hops: 1,
       ttl: defaultTtl,
-      latitude: payload.latitude,
-      longitude: payload.longitude,
+      latitude: GeoEngine().currentLocation.latitude,
+      longitude: GeoEngine().currentLocation.longitude,
     );
     _broadcast(packet);
   }
 
+  /// Broadcasts emergency SOS to ALL nodes
   void broadcastSos({
     required String alertText,
   }) {
     final pid = _generatePacketId();
     _markSeen(pid);
-
-    final payload = EdgeMlEngine().processTransmission(
-      rawText: alertText,
-      sourceLang: primaryLanguage,
-      targetLang: 'ALL',
-    );
 
     final packet = TransceiverPacket(
       packetId: pid,
@@ -334,12 +327,12 @@ class TransceiverEngine {
       senderName: nodeName,
       sourceLang: primaryLanguage,
       targetLang: 'ALL',
-      content: payload.translatedText,
+      content: alertText,
       timestamp: DateTime.now().millisecondsSinceEpoch,
       hops: 1,
       ttl: defaultTtl + 2,
-      latitude: payload.latitude,
-      longitude: payload.longitude,
+      latitude: GeoEngine().currentLocation.latitude,
+      longitude: GeoEngine().currentLocation.longitude,
     );
     _broadcast(packet);
   }
@@ -393,35 +386,8 @@ class TransceiverEngine {
       );
       _peerStreamController.add(_activePeers.values.toList());
 
-      // Edge translation into this node's primary language if required
-      String localContent = packet.content;
-      if (packet.targetLang != primaryLanguage && packet.targetLang != 'ALL') {
-        final trans = EdgeMlEngine().processTransmission(
-          rawText: packet.content,
-          sourceLang: packet.sourceLang,
-          targetLang: primaryLanguage,
-        );
-        localContent = trans.translatedText;
-      }
-
-      final deliveredPacket = TransceiverPacket(
-        packetId: packet.packetId,
-        type: packet.type,
-        senderId: packet.senderId,
-        senderName: packet.senderName,
-        relayedBy: packet.relayedBy,
-        sourceLang: packet.sourceLang,
-        targetLang: primaryLanguage,
-        content: localContent,
-        timestamp: packet.timestamp,
-        hops: packet.hops,
-        ttl: packet.ttl,
-        latitude: packet.latitude,
-        longitude: packet.longitude,
-      );
-
-      if (deliveredPacket.type != PacketType.beacon) {
-        _incomingPacketController.add(deliveredPacket);
+      if (packet.type != PacketType.beacon) {
+        _incomingPacketController.add(packet);
       }
 
       if (relayEnabled && packet.ttl > 1 && packet.type != PacketType.beacon) {

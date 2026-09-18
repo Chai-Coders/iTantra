@@ -6,8 +6,14 @@ import '../ml_engine.dart';
 import '../geo_engine.dart';
 
 class TransmittingScreen extends StatefulWidget {
-  final String targetLang;
-  const TransmittingScreen({super.key, required this.targetLang});
+  final String myLanguage;
+  final String? targetLang;
+
+  const TransmittingScreen({
+    super.key,
+    this.myLanguage = 'English',
+    this.targetLang,
+  });
 
   @override
   State<TransmittingScreen> createState() => _TransmittingScreenState();
@@ -19,18 +25,27 @@ class _TransmittingScreenState extends State<TransmittingScreen> {
   final TextEditingController _textController = TextEditingController();
   bool _isProcessing = false;
   final SttService _stt = SttService();
-  String _translatedPreview = '';
+
+  late String _currentLanguage;
+  String _englishPivotText = '';
 
   final List<String> _quickPhrases = const [
-    'Evacuation teams arriving at sector junction.',
-    'Status normal. Holding current perimeter.',
-    'Require medical support at forward checkpoint.',
-    'Water surge detected. Requesting relocation.',
+    'people trapped need immediate rescue',
+    'need drinking water and food packets',
+    'require medical support and doctor at checkpoint',
+    'water level rising flood alert',
+    'status normal holding current perimeter',
+    'road blocked bridge collapsed',
+    'we are safe at current location',
   ];
 
   @override
   void initState() {
     super.initState();
+    _currentLanguage = widget.myLanguage.isNotEmpty
+        ? widget.myLanguage
+        : (widget.targetLang ?? 'English');
+
     _startRecordingSession();
     _timer = Timer.periodic(const Duration(seconds: 1), (_) {
       if (mounted) setState(() => _seconds++);
@@ -39,38 +54,39 @@ class _TransmittingScreenState extends State<TransmittingScreen> {
 
   Future<void> _startRecordingSession() async {
     await _stt.startListening(
-      language: widget.targetLang,
+      language: _currentLanguage,
       onResult: (liveText, isFinal) {
         if (mounted && liveText.trim().isNotEmpty) {
-          final payload = EdgeMlEngine().processTransmission(
-            rawText: liveText,
-            sourceLang: 'English',
-            targetLang: widget.targetLang,
-          );
+          final pivot = EdgeMlEngine().translateToEnglishPivot(liveText, _currentLanguage);
           setState(() {
             _textController.text = liveText;
-            _translatedPreview = payload.translatedText;
+            _englishPivotText = pivot;
           });
         }
       },
       onPauseDetected: () {
         if (_textController.text.trim().isNotEmpty) {
-          _finishAndBroadcast(_textController.text.trim());
+          _finishAndBroadcast();
         }
       },
     );
   }
 
-  void _finishAndBroadcast(String text) {
+  void _finishAndBroadcast() {
     if (_isProcessing) return;
     _isProcessing = true;
     _stt.stop();
 
-    final payload = text.trim().isNotEmpty ? text.trim() : 'check_in';
+    final input = _textController.text.trim();
+    final englishPivot = _englishPivotText.trim().isNotEmpty
+        ? _englishPivotText.trim()
+        : (input.isNotEmpty
+            ? EdgeMlEngine().translateToEnglishPivot(input, _currentLanguage)
+            : 'status normal holding current perimeter');
 
     TransceiverEngine().broadcastVoiceText(
-      text: payload,
-      targetLang: widget.targetLang,
+      englishPivot: englishPivot,
+      targetLang: 'ALL',
     );
     Navigator.pop(context);
   }
@@ -105,15 +121,13 @@ class _TransmittingScreenState extends State<TransmittingScreen> {
                           onPressed: () => Navigator.pop(context),
                         ),
                         const SizedBox(width: 4),
-                        const Text('Live Transmission',
+                        const Text('Live Voice Transmission',
                             style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
                       ],
                     ),
                     IconButton(
                       icon: const Icon(Icons.check_circle, color: Color(0xFF27AE60), size: 28),
-                      onPressed: () => _finishAndBroadcast(
-                        _textController.text.isNotEmpty ? _textController.text : 'check_in',
-                      ),
+                      onPressed: _finishAndBroadcast,
                     ),
                   ],
                 ),
@@ -168,8 +182,6 @@ class _TransmittingScreenState extends State<TransmittingScreen> {
                   ),
                 ),
                 const SizedBox(height: 12),
-
-                // Location Pill
                 Container(
                   padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
                   decoration: BoxDecoration(
@@ -189,7 +201,6 @@ class _TransmittingScreenState extends State<TransmittingScreen> {
                     ],
                   ),
                 ),
-
                 const SizedBox(height: 12),
                 ValueListenableBuilder<String>(
                   valueListenable: _stt.statusNotifier,
@@ -207,7 +218,7 @@ class _TransmittingScreenState extends State<TransmittingScreen> {
                         ),
                         const SizedBox(width: 6),
                         Text(
-                          status,
+                          '$_currentLanguage Input: $status',
                           style: const TextStyle(fontSize: 11, color: Colors.white70),
                         ),
                       ],
@@ -215,8 +226,6 @@ class _TransmittingScreenState extends State<TransmittingScreen> {
                   },
                 ),
                 const SizedBox(height: 14),
-
-                // Raw Input Area
                 Container(
                   width: double.infinity,
                   padding: const EdgeInsets.all(12),
@@ -230,25 +239,18 @@ class _TransmittingScreenState extends State<TransmittingScreen> {
                     maxLines: 2,
                     style: const TextStyle(color: Colors.white, fontSize: 13),
                     onChanged: (val) {
-                      final trans = EdgeMlEngine().processTransmission(
-                        rawText: val,
-                        sourceLang: 'English',
-                        targetLang: widget.targetLang,
-                      );
                       setState(() {
-                        _translatedPreview = trans.translatedText;
+                        _englishPivotText = EdgeMlEngine().translateToEnglishPivot(val, _currentLanguage);
                       });
                     },
-                    decoration: const InputDecoration(
+                    decoration: InputDecoration(
                       border: InputBorder.none,
-                      hintText: 'Speak now, type manually, or tap a tactical chip below...',
-                      hintStyle: TextStyle(color: Colors.white38, fontSize: 12),
+                      hintText: 'Speak in $_currentLanguage or pick a preset below...',
+                      hintStyle: const TextStyle(color: Colors.white38, fontSize: 12),
                     ),
                   ),
                 ),
-
-                // Translation Preview
-                if (_translatedPreview.isNotEmpty) ...[
+                if (_englishPivotText.isNotEmpty) ...[
                   const SizedBox(height: 10),
                   Container(
                     width: double.infinity,
@@ -261,46 +263,45 @@ class _TransmittingScreenState extends State<TransmittingScreen> {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Row(
+                        const Row(
                           children: [
-                            const Icon(Icons.translate, size: 12, color: Color(0xFF2F80ED)),
-                            const SizedBox(width: 6),
+                            Icon(Icons.memory, size: 12, color: Color(0xFF2F80ED)),
+                            SizedBox(width: 6),
                             Text(
-                              'Auto-Translated to ${widget.targetLang}:',
-                              style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Color(0xFF2F80ED)),
+                              'Edge ML -> Universal English Mesh Pivot:',
+                              style: TextStyle(
+                                fontSize: 11,
+                                fontWeight: FontWeight.bold,
+                                color: Color(0xFF2F80ED),
+                              ),
                             ),
                           ],
                         ),
-                        const SizedBox(height: 6),
+                        const SizedBox(height: 4),
                         Text(
-                          _translatedPreview,
+                          _englishPivotText,
                           style: const TextStyle(fontSize: 12, color: Colors.white, height: 1.3),
                         ),
                       ],
                     ),
                   ),
                 ],
-
                 const SizedBox(height: 14),
                 Wrap(
                   spacing: 8,
                   runSpacing: 6,
-                  children: _quickPhrases.map((phrase) {
+                  children: _quickPhrases.map((phraseKey) {
+                    final localDisplay = EdgeMlEngine().translateFromEnglishPivot(phraseKey, _currentLanguage);
                     return ActionChip(
                       backgroundColor: const Color(0xFF1E232B),
                       label: Text(
-                        phrase,
+                        localDisplay,
                         style: const TextStyle(fontSize: 11, color: Colors.white70),
                       ),
                       onPressed: () {
-                        final trans = EdgeMlEngine().processTransmission(
-                          rawText: phrase,
-                          sourceLang: 'English',
-                          targetLang: widget.targetLang,
-                        );
                         setState(() {
-                          _textController.text = phrase;
-                          _translatedPreview = trans.translatedText;
+                          _textController.text = localDisplay;
+                          _englishPivotText = phraseKey;
                         });
                       },
                     );
@@ -315,11 +316,9 @@ class _TransmittingScreenState extends State<TransmittingScreen> {
                       backgroundColor: const Color(0xFF2F80ED),
                       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
                     ),
-                    onPressed: () => _finishAndBroadcast(
-                      _textController.text.isNotEmpty ? _textController.text : 'check_in',
-                    ),
+                    onPressed: _finishAndBroadcast,
                     child: const Text(
-                      'TRANSMIT PACKET OVER MESH',
+                      'BROADCAST OVER MESH',
                       style: TextStyle(fontWeight: FontWeight.bold, color: Colors.white),
                     ),
                   ),
