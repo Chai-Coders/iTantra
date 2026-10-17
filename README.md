@@ -24,6 +24,8 @@ Disaster-response coordination in India is critically hampered by the **language
 
 **Demo & Explanation Video:** [https://www.youtube.com/watch?v=S2vu6kKMsqM](https://www.youtube.com/watch?v=S2vu6kKMsqM)
 
+**AI STT Browser Demo:** [https://huggingface.co/spaces/zxnjxd/itantra-stt-browser](https://huggingface.co/spaces/zxnjxd/itantra-stt-browser)
+
 ---
 
 ## Solution — iTantra
@@ -79,6 +81,10 @@ A single spoken sentence in Malayalam reaches a Bengali-speaking rescuer 3 hops 
 - **SpeechEngine (TTS)**: `flutter_tts` with per-language locale, pitch, rate, and volume tuning.
 - Separate `playVoiceNote` (normal voice) and `playEmergencyAlert` (slower, louder) modes.
 - Pre-built phrase book for the two most critical field messages (evacuation, check-in confirmation).
+
+#### Interactive AI STT Browser Demo
+
+For an interactive browser-based demonstration of the AI speech-to-text workflow, see the **AI STT Browser Demo**: [https://huggingface.co/spaces/zxnjxd/itantra-stt-browser](https://huggingface.co/spaces/zxnjxd/itantra-stt-browser).
 
 ### Priority SOS Broadcast
 
