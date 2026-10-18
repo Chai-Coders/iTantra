@@ -1,0 +1,25 @@
+{
+ "tier": "int8",
+ "profiles": {
+  "hi,gu,mr,kn,ml,ta,te,or,bn,en": {
+   "accuracy": {
+    "hi": 100.0,
+    "gu": 100.0,
+    "mr": 100.0,
+    "kn": 100.0,
+    "ml": 100.0,
+    "ta": 100.0,
+    "te": 100.0,
+    "or": 100.0,
+    "bn": 100.0,
+    "en": 95.0
+   },
+   "mean": 99.5,
+   "confusions": {
+    "en->bn": 1
+   },
+   "avg_lid_ms": 511
+  }
+ },
+ "command": "python scripts/evaluate_engine_lid.py --profiles hi,gu,mr,kn,ml,ta,te,or,bn,en --tier int8"
+}

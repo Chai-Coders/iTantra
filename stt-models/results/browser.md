@@ -1,0 +1,96 @@
+# Browser engine (measured 2026-10-17)
+
+The engine ported to JavaScript (`web/lib/`) running the same INT8 ONNX models in ONNX Runtime Web 1.30
+(WebAssembly, SIMD, multi-threaded). Laptop i7-14650HX, CPU only, 8 WebAssembly threads.
+Browser runs: Chromium 152 (headless), `web/test/browser_e2e.mjs`. Node runs use the same `onnxruntime-web` package.
+
+## Parity with the Python engine
+
+| Check | Result | Command |
+|---|---|---|
+| Log-mel features (NeMo, IndicConformer, Whisper) | max abs diff 0 / 0 / 1.2e-7 | `node test/feat.mjs` |
+| Language ID top-1, 30 smoke clips | 30/30 agree | `node test/parity_asr.mjs <ref>` |
+| ASR transcripts, 27 Indian clips × CTC/RNN-T + 3 English | 47/57 identical, 1.3% WER between JS and Python | same |
+| IndicProcessor pre/postprocessing, 499 FLEURS sentences | 499/499 and 499/499 identical | `node test/parity_text.mjs <ref>` |
+| Translation token ids / outputs, 29 sentences | 29/29 / 16/29 identical (rest are rewordings) | `node test/parity_mt.mjs <ref>` |
+| Whole pipeline, all10_languages.wav | 13/13 segments, languages 13/13, transcripts 11/13 identical | `node test/pipeline.mjs …` |
+
+Remaining differences come from the WebAssembly INT8 kernels: on the same input the MT encoder output differs from
+native ONNX Runtime by 0.13 (max abs, values up to 22.7, ≈0.5%), and native ORT gives identical output with graph
+optimisations on or off, so the port itself is not the cause. That is enough to flip some greedy choices.
+
+## Accuracy
+
+ASR word error rate on the smoke set (20 FLEURS clips per language, RNN-T, INT8), same normalisation as
+`src/indicstt/evaluation.py`. Raw: `browser-asr.json` (`node test/eval_wer.mjs rnnt`).
+
+| Lang | Browser (ONNX Runtime Web) | Python engine (native, `quantization.md`) |
+|---|---|---|
+| hi | 8.92 | 8.92 |
+| gu | 17.82 | 17.59 |
+| mr | 16.67 | 15.86 |
+| kn | 17.82 | 18.75 |
+| ml | 26.73 | 27.06 |
+| ta | 26.32 | 27.19 |
+| te | 22.03 | 21.47 |
+| or | 21.87 | 21.33 |
+| bn | 13.48 | 13.30 |
+| **mean** | **19.07** | **19.05** |
+
+Same accuracy: per-language differences go both ways (from −0.93 kn to +0.81 mr; ±1 point is within noise for 20 clips) and the mean moves by 0.02 points.
+Browser runtime in Node, 8 threads: RTF 0.294 for encoder + RNN-T decode (native: 0.128).
+
+### INT4-mixed speech model (the low-end tier)
+
+Same 180 clips, `node test/eval_wer.mjs rnnt int4mixed` → `browser-asr-int4mixed.json`: mean WER **19.34%** in the
+browser vs **19.39%** native (hi 9.11, gu 17.82, mr 17.74, kn 18.13, ml 25.74, ta 26.61, te 22.03, or 22.40, bn 14.46).
+Download for Hindi + English → English: 871 MB vs 1,011 MB with INT8. Speed in Chromium (8 threads, hi + en sample and
+the 10-language test, 68.5 s of speech): real-time factor 0.46 vs 0.40 with INT8; the speech encoder takes 17.4 s vs
+13.5 s for the same 435 GMAC. As on native x86 (`quantization.md`), the INT4 MatMulNBits kernels save size, not time.
+Live check on the Space with a fresh profile: 871 MB fetched from the Hub in 200 s, language test 10/10.
+
+## Latency and memory vs the native engine (measured 2026-10-18)
+
+Same laptop, same clip (`mixed_en_hi_ta.wav`, 62.7 s: English, Hindi, English, Tamil), languages hi + en + ta → en,
+streamed at real-time pace in 32 ms chunks like a microphone. Time-to-text = voice detection closes the part (end of
+speech + 0.4 s) → text ready. Memory = peak resident memory of the process doing the work (browser: the tab's renderer,
+which holds the page, the worker and its WebAssembly threads). Raw: `latency-memory-2026-10-18.json`.
+
+| | Browser INT8 | Browser INT4-mixed | Native INT8 | Native INT4-mixed |
+|---|---|---|---|---|
+| Time-to-text, Hindi/Tamil → English (with MT), median / max | 2.24 s / 4.17 s | 2.64 s / 4.73 s | 1.07 s / 1.91 s | 2.16 s / 2.61 s |
+| Time-to-text, English (no MT), the 2 parts | ≤ 2.57 s | 2.45 s, 2.64 s | 1.28 s / 1.39 s (median / max) | 1.39 s / 1.58 s |
+| Peak memory | 1,596 MB | 1,534 MB | 1,695 MB | 1,524 MB |
+| Load (models cached / on disk) | 7.7 s | 8.5 s | 7.1 s | 6.8 s |
+| Model download / disk for this language set | 1,011 MB | 871 MB | same files | same files |
+
+- **Latency: the browser takes about 2× as long.** Two reasons: the WebAssembly INT8 kernels are slower than native
+  (encoder 2.3×, `browser-asr.json` vs `quantization.md`), and the browser runs one part at a time (LID, then encoder)
+  where the native engine runs LID and the encoder in parallel with 2 ASR workers. The browser maximum (4–5 s) is the
+  longest part (10 s of speech); there is no queueing on this clip.
+- **Memory: about the same.** 1.5–1.6 GB in the tab vs 1.5–1.7 GB native. INT4-mixed saves 60–170 MB.
+- **INT4-mixed is not faster on this x86 CPU** in either runtime; it saves download size and some memory.
+- Run-to-run noise is real: native INT4-mixed with MT measured 1.09 s two days ago (`engine-latency.md`) and 2.16 s
+  today, so treat single runs as ±0.5 s.
+
+Commands: `REALTIME=1 node test/browser_e2e.mjs "http://127.0.0.1:8080/?langs=en,hi,ta&target=en&tier=<tier>"` (with
+`npm run serve`), and `python scripts/benchmark_engine.py data/demo/mixed_en_hi_ta.wav --langs hi en ta --target en --tier <tier>`.
+
+## Speed and compute (Chromium, 8 threads, models from Cache Storage)
+
+| Clip | Speech | Compute | Real-time factor | GMAC |
+|---|---|---|---|---|
+| mixed_en_hi_ta.wav (en, hi, ta → en) | 49.5 s | 20.1 s | 0.41 | 434 |
+| all10_languages.wav (10 languages → en) | 61.9 s | 38.0 s | 0.61 | 664 |
+
+Per stage on the mixed clip: speech encoder 252 GMAC in 7.8 s, language ID 110 GMAC in 2.3 s, Whisper encoder
+37 GMAC in 1.4 s, translation 31 GMAC in 2.1 s; throughput 26 GMAC/s. The Whisper encoder always sees a padded
+30 s window (18.5 GMAC per call), which is why short English parts cost as much as long ones.
+
+Model load (en + hi + ta, 15 ONNX graphs, 1,011 MB): 8.3 s from the local server, 7.8 s from Cache Storage on a
+later visit (Hindi only, 11 graphs: 6.4 s). With the network switched off after loading (`OFFLINE=1`), the clip transcribes and translates the
+same; requests sent while transcribing: 0.
+
+MAC counts: `scripts/count_macs.py` profiles each model with ONNX Runtime (graph optimisations off), sums
+Conv / MatMul / Gemm / LSTM MACs from the real node shapes, and fits them in the input length (`web/compute.json`).
+Speech encoder: 79.5 M MACs per 10 ms mel frame ≈ 7.9 GMAC per second of audio.

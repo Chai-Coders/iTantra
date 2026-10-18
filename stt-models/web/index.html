@@ -1,0 +1,109 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>iTantra On-Device STT</title>
+<meta name="description" content="Indic speech-to-text and translation running entirely in your browser: no server, audio never leaves the device.">
+<script src="coi-serviceworker.min.js"></script>
+<link rel="stylesheet" href="app.css">
+</head>
+<body>
+<header class="top">
+  <div class="wrap">
+    <div>
+      <h1>iTantra <span>on-device speech-to-text</span></h1>
+      <p class="lede">10 Indian languages, mixed freely, transcribed and translated <strong>inside this tab</strong>.
+        No server sees your audio.</p>
+    </div>
+    <div class="pills" id="pills"></div>
+  </div>
+</header>
+
+<main class="wrap grid">
+  <section class="col-main">
+    <div class="card" id="setup">
+      <div class="langs" id="langs" aria-label="Speaker languages"></div>
+      <div class="row">
+        <label class="field">Translate into <select id="target"></select></label>
+        <label class="field">Speech model <select id="tier"></select></label>
+        <label class="field">Decoder <select id="mode"><option value="rnnt">RNN-T (accurate)</option><option value="ctc">CTC (fast)</option></select></label>
+        <label class="field">Threads <select id="threads"></select></label>
+        <div class="loadbox">
+          <span class="download" id="download"></span>
+          <button class="primary" id="load">Load models</button>
+        </div>
+      </div>
+      <p class="hint small device-note" id="device-note">Best on desktop Chrome or Edge. Models download once (about 1 GB for two languages) and stay cached.</p>
+      <div class="loading" id="loading" hidden>
+        <div class="bar"><div id="loadbar"></div></div>
+        <div class="loadtext" id="loadtext"></div>
+      </div>
+    </div>
+
+    <nav class="tabs" role="tablist">
+      <button role="tab" class="tab" data-tab="try" aria-selected="true">Try it</button>
+      <button role="tab" class="tab" data-tab="lid" aria-selected="false">Language test</button>
+      <button role="tab" class="tab" data-tab="how" aria-selected="false">How it works</button>
+    </nav>
+
+    <div class="panel" id="panel-try">
+      <div class="card needs-models" aria-disabled="true">
+        <div class="controls">
+          <button class="primary" id="try-sample" disabled>Play a sample</button>
+          <button id="mic" disabled>Record</button>
+          <label class="button">Upload a file<input type="file" id="file" accept="audio/*" disabled hidden></label>
+          <div class="vad"><div class="meter"><div id="vadbar"></div></div><span class="vadstate" id="vadstate">load models first</span></div>
+        </div>
+        <audio id="player" controls hidden></audio>
+        <div class="legend" id="try-legend"><span><i style="background:var(--s-vad)"></i>VAD</span><span><i style="background:var(--s-lid)"></i>language ID</span><span><i style="background:var(--s-enc)"></i>encoder</span><span><i style="background:var(--s-dec)"></i>decode</span><span><i style="background:var(--s-mt)"></i>translate</span><span>· bar = compute time per part</span></div>
+        <div id="segments" class="segments"></div>
+      </div>
+    </div>
+
+    <div class="panel" id="panel-lid" hidden>
+      <div class="card needs-models" aria-disabled="true">
+        <p class="hint">Voice detection cuts audio at pauses; each chunk gets a language. All 10 languages are candidates.</p>
+        <div class="controls">
+          <button class="primary" id="lid-all" disabled>All 10 languages</button>
+          <button id="lid-mine" disabled>Your languages</button>
+          <button id="lid-mic" disabled>Record</button>
+          <label class="button">Upload a file<input type="file" id="lid-file" accept="audio/*" disabled hidden></label>
+          <span class="vadstate" id="lid-status"></span>
+        </div>
+        <audio id="lid-player" controls hidden></audio>
+        <div id="lid-results"></div>
+      </div>
+    </div>
+
+    <div class="panel" id="panel-how" hidden>
+      <div class="card" id="how-body"></div>
+    </div>
+  </section>
+
+  <aside class="col-side">
+    <div class="card sticky">
+      <h2>Compute on this device</h2>
+      <div class="kpis">
+        <div class="kpi"><div class="v" id="k-audio">0.0 s</div><div class="l">speech processed</div></div>
+        <div class="kpi"><div class="v" id="k-rtf">–</div><div class="l">compute ÷ speech time</div></div>
+        <div class="kpi"><div class="v" id="k-gmac">0</div><div class="l">GMAC executed</div></div>
+        <div class="kpi"><div class="v zero" id="k-net">0</div><div class="l">requests sent while working</div></div>
+      </div>
+      <table class="models" id="models">
+        <thead><tr><th>Stage</th><th>Time</th><th>GMAC</th></tr></thead>
+        <tbody></tbody>
+      </table>
+      <dl class="facts" id="facts"></dl>
+      <p class="hint small">GMAC = billions of multiply-accumulates, counted from each model run's tensor shapes.</p>
+    </div>
+  </aside>
+</main>
+
+<footer class="wrap foot">
+  Models: IndicConformer 600M &amp; IndicTrans2 (AI4Bharat, MIT) · AmberNet (NVIDIA) · whisper-tiny.en (OpenAI, MIT) ·
+  Silero VAD (MIT), INT8 ONNX on ONNX Runtime Web. Samples: FLEURS (Google, CC-BY-4.0).
+</footer>
+<script type="module" src="app.js"></script>
+</body>
+</html>
